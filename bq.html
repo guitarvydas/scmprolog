@@ -8,23 +8,20 @@
   </head>
   <body>
 
-    <h1>Backquote Replacer For Scheme</h1>
+    <h1>Backquote Replacer For Prolog Scheme App</h1>
     <br>
     <label for="src">source:</label>
-    <textarea id="src" rows="7" cols="60" placeholder="src" style="background-color:oldlace;">
-      `(a ,b c)
+    <textarea id="src" rows="2" cols="60" placeholder="src" style="background-color:oldlace;">
+                    (append (cdr a) `(r! ,l) (cdr g))
     </textarea>
-    <!-- <textarea id="hold-src" rows="7" cols="60" placeholder="src" style="background-color:oldlace;"> -->
-    <!--   a -->
-    <!--   'a -->
-    <!--   `a -->
-    <!--   `(a) -->
-    <!--   `(a ,b c) -->
-    <!--   `(a ,@(b c) d) -->
-    <!-- </textarea> -->
     <br>
     <label for="output">output:</label>
-    <textarea id="output" rows="7" cols="60" placeholder="transpiled"  readonly style="background-color:whitesmoke;">
+    <textarea id="output" rows="2" cols="60" placeholder="transpiled"  readonly style="background-color:whitesmoke;">
+    </textarea>
+    <br>
+    <br>
+    <label for="regression">regression:</label>
+    <textarea id="regression" rows="2" cols="60" placeholder="transpiled"  readonly style="background-color:whitesmoke;">
     </textarea>
     <br>
     <p id="status" > READY </p>
@@ -73,17 +70,20 @@ space += comment
 }
 
 bqscheme <: scheme {
-  Sexpr :=
-    | QuotedSexpr -- quoted
-    | bq BQSexpr -- bq
-    | List -- list
-    | atom -- atom
-  BQSexpr =
-    | ",@" BQSexpr -- bqsplice
-    | "," Sexpr -- bqeval
-    | List -- bqlist
-    | atom -- bqatom
+  Sexpr += 
+    | bq BQList -- bqlist
+    //| bq atom -- bq YAGNI
+    //| bq QuotedList -- YAGNI
+  BQList =
+   //| "(" BQSexpr* "." BQSexpr ")" -- dotted YAGNI
+   | "(" BQitem* ")" -- plain
+  BQitem =
+    //| ",@" BQList -- bqconstsplice YAGNI
+    //| ",@" Sexpr -- bqsplice YAGNI
+    | "," Sexpr -- eval
+    | Sexpr -- quoted
 }
+
 `);
 
       const hooks = {
@@ -98,6 +98,10 @@ bqscheme <: scheme {
 	  
 	  List_dotted: function (klp, Sexprs1, kdot, Sexpr2, krp) {
 	      return `(${Sexprs1.bq ().join ('')} . ${Sexpr2.bq ()})`;
+	  },
+	  
+	  List_plain: function (klp, Sexprs, krp) {
+	      return `(${Sexprs.bq ().join ('')})`;
 	  },
 	  
 	  QuotedSexpr: function (sq, Sexpr) {
@@ -153,45 +157,22 @@ bqscheme <: scheme {
 	  },
 	  
 	  // bqscheme
-	  Sexpr_quoted: function (x) {
-	      return x.bq ();
-	  },
-	  
-	  Sexpr_bq: function (kbq, x) {
+	  Sexpr_bqlist: function (kbq, x) {
 	      return `(list ${x.bq ()})`;
 	  },
 	  
-	  Sexpr_list: function (x) {
-	      return x.bq ();
+	  BQList_plain: function (klp, Sexprs, krp) {
+	      return `${Sexprs.bq ().join ('')}`;
 	  },
 	  
-	  Sexpr_atom: function (x) {
-	      return x.bq ();
+	  BQitem_eval: function (kcomma, Sexpr) {
+	      return Sexpr.bq ();
 	  },
-	  
-	  BQSexpr_bqsplice: function (kcommaat, BQSexpr) {
-	      return `,@${BQSexpr.bq ()}`;
+
+	  BQitem_quoted: function (Sexpr) {
+	      return "'" + Sexpr.bq ();
 	  },
-	  
-	  BQSexpr_bqeval: function (kcomma, BQSexpr) {
-	      return `${BQSexpr.bq ()}`;
-	  },
-	  
-	  BQSexpr_bqlist: function (BQSexpr) {
-	      return BQSexpr.bq ();
-	  },
-	  
-	  BQSexpr_bqatom: function (a) {
-	      return `${a.bq ()}`;
-	  },
-	  
-	  BQList_dotted: function (klp, BQSexprs1, kdot, BQSexpr2, krp) {
-	      return `'${BQSexprs1.bq ().join (" '")} . '${BQSexpr2.bq ()}`;
-	  },
-	  BQList_plain: function (klp, BQSexprs, krp) {
-	      return `'${BQSexprs.bq ().join (" '")}`;
-	  },
-	  
+
 	  _terminal: function () { return this.sourceString; },
 	  _iter: function (...children) {
 	      var mapped = children.map(c => {
@@ -213,6 +194,16 @@ bqscheme <: scheme {
               let treeWalker = sem (matchResult);
               let text = treeWalker.bq ();
               document.getElementById('output').value = text;
+	      {
+		  let regression_src = document.getElementById ('output').value;
+		  let regression_grammar = grammars["scheme"]
+		  let regression_matchResult = regression_grammar.match (src);
+		  if (regression_matchResult.succeeded ()) {
+		      document.getElementById('regression').innerHTML = "regression Parsed OK";
+		  } else {
+		      document.getElementById('regression').innerHTML = "regression FAILED";
+		  }
+	      }
 	  } else {
               document.getElementById('output').value = grammar.trace (src);
               document.getElementById('status').innerHTML = "parse FAILED";

@@ -1,0 +1,11 @@
+`( ... )
+`x
+
+`x -> 'x
+`( ... ) -> (list bqitem+)
+
+bqitem = x -> 'x
+bqitem = ,x -> x
+bqitem = ,@x -> ???
+bqitem = ,@(x) -> x ?YAGNI?
+

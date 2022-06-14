@@ -1,0 +1,32 @@
+scheme {
+  Main = Sexpr+
+  Sexpr =
+    | QuotedSexpr -- quoted
+    | bq Sexpr -- bq
+    | "," Sexpr -- comma
+    | ",@" Sexpr -- commaat
+    | List -- list
+    | atom -- atom
+
+atom =
+  | string
+  | number
+  | symbol
+
+List = "(" Sexpr* ")"
+
+QuotedSexpr = sq Sexpr
+
+string = dq (~dq any)* dq
+number = digit+
+ws = " " | "\n" | "\t"
+separator = "(" | ")" | "," | bq | sq | ",@" | dq | ";"
+dq = "\""
+sq = "'"
+bq = "`"
+symbol = symchar+
+symchar = ~separator ~ws any
+comment = ";" (~nl any)* nl
+nl = "\n"
+space += comment
+}

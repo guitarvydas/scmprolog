@@ -1,0 +1,1282 @@
+<html>
+  <head>
+    <title>Transpile a Scheme program to JavaScript</title>
+    <meta charset=utf-8>
+    <!-- Ohm-JS -->
+    <script src="https://unpkg.com/ohm-js@16/dist/ohm.min.js"></script>
+
+<!-- prolog-6a.scm -->
+<script type="text/test">
+;; begin prolog-6a.scm
+
+;; utility functions
+(define (first x) (car x))
+(define (rest x) (cdr x))
+
+(define (AppendInefficient list1 list2)
+  (if (null? list1)
+      list2
+      (cons (car list1) (AppendInefficient (cdr list1) list2))))
+
+(define (AppendInefficient3 list1 list2 list3)
+  (AppendInefficient list1 (AppendInefficient list2 list3)))
+
+(define result_ '())
+(define (clear_result) (set! result_ '()))
+(define (append_to_result lis) (set! result_ (cons lis result_)))
+(define (get_result) result_)
+(define (display_result) (display (get_result)))
+
+;;;;
+
+(define link list)
+(define L_l car)
+(define L_g cadr)
+(define L_r caddr)
+(define L_e cadddr)
+(define (L_n x) (car (cddddr x)))
+
+
+(define (L_c x) (cadr (cddddr x)))
+
+
+(define (clear_r x)
+  (set-car! (cddr x) '(())))
+
+
+(define (back6 l g r e n c whole-db)
+  (cond
+    ((and (pair? g)
+          (pair? r))
+      (prove6 l g (cdr r) e n c whole-db))
+    ((pair? l)
+      (prove6 (L_l l)
+              (L_g l)
+              (cdr (L_r l))
+              (L_e l)
+              (L_n l)
+              (L_c l)
+	      whole-db))))
+
+
+;; g == goals
+;; r == rules (factbase)
+(define (prove6 l g r e n c whole-db)
+  
+;;   (newline) (display "prove6") (newline)
+;; ;  (display "l = ") (display l) (newline)
+;;   (display "g = ") (display g) (newline)
+;;   (display "r = ") (display r) (newline)
+;;   (display "e = ") (display e) (newline)
+;; ;  (display "n = ") (display n) (newline)
+;; ;  (display "c = ") (display c) (newline)
+;; ;  (display "w = ") (display whole-db) (newline)
+;;   (newline)
+  
+  (cond
+    ((null? g)
+      (let ((next_result (print-frame e)))
+	(append_to_result next_result))
+      (back6 l g r e n c whole-db))
+    ((eq? '! (car g))
+      (clear_r c)
+      (prove6 c (cdr g) r e n c whole-db))
+    ((eq? 'r! (car g))
+      (prove6 l (cddr g) r e n (cadr g) whole-db))
+    ((null? r)
+      (if (null? l)
+          #t
+          (back6 l g r e n c whole-db)))
+    ((foreign? (car g))
+     (call-foreign (car g) e)
+     (prove6 l (cdr g) r e n c whole-db))
+    ((foreign? (car r))
+     (call-foreign (car r) e)
+     (prove6 l g (cdr r) e n c whole-db))
+    (else
+      (let ((a  (copy (car r) n)))
+        (let ((e* (unify (car a) (car g) e)))
+          (if e*
+              (prove6 (link l g r e n c)
+                      (AppendInefficient3 (cdr a) `(r! ,l) (cdr g))
+                      whole-db
+                      e*
+                      (+ 1 n)
+                      l
+		      whole-db)
+              (back6 l g r e n c whole-db))))
+      )))
+
+(define empty '((bottom)))
+
+;(define var '?) ; removed for transpilation
+(define name cadr)
+(define time cddr)
+
+(define (var? x)
+  (and (pair? x)
+       (string? (car x))
+       (string=? "?" (car x))))
+
+;; manually rewritten named let
+(define (lookup_loop e id tm)
+    (cond ((not (pair? (caar e)))
+	   #f)
+	  ((and (eq? id (name (caar e)))
+		(eqv? tm (time (caar e))))
+	   (car e))
+	  (else
+	   (lookup_loop (cdr e) id tm))))
+
+(define (lookup v e)
+    (let ((id (name v))
+          (tm  (time v)))
+      (lookup_loop e id tm)))
+;;; end rewrite
+
+(define (value x e)
+  (cond ((foreign? x)
+	 (call-foreign x e))
+	((var? x)
+	 (let ((v (lookup x e)))
+           (if v
+               (value (cadr v) e)
+               x)))
+	(else x)))
+
+(define (copy x n)
+  (cond
+    ((not (pair? x)) x)
+    ((var? x) (AppendInefficient x n))
+    (else
+      (cons (copy (car x) n)
+            (copy (cdr x) n)))))
+
+(define (bind x y e)
+  (cons (list x y) e))
+
+(define (unify x1 y1 e)
+  (let ((x (value x1 e))
+        (y (value y1 e)))
+    (cond
+      ((eq? x y) e)
+      ((var? x) (bind x y e))
+      ((var? y) (bind y x e))
+      ((or (not (pair? x))
+           (not (pair? y))) #f)
+      (else
+        (let ((e* (unify (car x) (car y) e)))
+          (and e* (unify (cdr x) (cdr y) e*)))))))
+
+
+(define (resolve x e)
+  (cond ((not (pair? x)) x)
+        ((var? x)
+          (let ((v (value x e)))
+            (if (var? v)
+                v
+                (resolve v e))))
+        (else
+          (cons
+            (resolve (car x) e)
+            (resolve (cdr x) e)))))
+
+(define (has_bindings_Q_ ee)
+  (pair? (cdr ee)))
+
+(define (get_var_name_from_binding ee)
+  (cadaar ee))
+
+(define (get_binding_value_from_binding ee e)
+  (resolve (caar ee) e))
+
+(define (no_timestamp_binding_Q_ ee)
+  (null? (time (caar ee))))
+
+(define (get_rest_of_bindings ee)
+  (cdr ee))
+
+(define (print_frame_helper ee all_bindings accumulator)
+  (cond ((has_bindings_Q_ ee)
+	 (let ((var_name (get_var_name_from_binding ee))
+	       (binding_value (get_binding_value_from_binding ee all_bindings))
+	       (remaining_bindings (get_rest_of_bindings ee)))
+           (cond ((no_timestamp_binding_Q_ ee)
+		  (print_frame_helper remaining_bindings 
+				      all_bindings 
+				      (cons 
+				       (cons var_name binding_value)
+				       accumulator)))
+		 (else 
+		  (print_frame_helper remaining_bindings 
+				      all_bindings 
+				      accumulator)))))
+        (else accumulator)))
+
+(define (print-frame e)
+  (let ((final_result (print_frame_helper e e '())))
+    final_result))
+
+
+(define db
+  '(
+    ((some 0))
+    ((some 10))
+    ((some 20))
+    ((some 30))
+    ((eq ("?" X) ("?" X)))
+    ((neq ("?" X) ("?" Y))
+     (eq ("?" X) ("?" Y)) ! fail)
+    ((neq ("?" X) ("?" Y)))
+   ))
+
+(define goals '((some ("?" X))
+		  (some ("?" Y))
+		  (neq ("?" X) ("?" Y))
+		  (eq ("?" X) ("@" "add" ("?" X) ("?" Y)))))
+
+
+(define (resolveArgs a bindings)
+  (resolveArgsHelper a '() bindings))
+
+(define (resolveArgsHelper args accumulator bindings)
+  (cond ((null? args)
+	 accumulator)
+	(else
+	 (resolveArgsHelper (cdr args) 
+			      (AppendInefficient accumulator
+						 (list (value (car args) bindings)))
+			      bindings))))
+
+
+(define (foreign? expr)
+  (and (pair? expr)
+       (string? (car expr))
+       (string=? "@" (car expr))))
+
+(define (call-foreign expr bindings)
+  (let ((func (cadr expr))
+	(args (cddr expr)))
+
+    (cond ((string=? "unity" func)
+	   (car args))
+
+	  ((string=? "add" func)
+	   (let ((resolved-args (resolveArgs args bindings)))
+	     ; (display "add bindings ") (display bindings) (newline)
+	     ; (display "add args ") (display args) (newline)
+	     ; (display "add resolved-args ") (display resolved-args) (newline)
+	     ; (newline)
+	     (+ (car resolved-args) (cadr resolved-args))))
+
+	  ((string=? "display" func)
+	   (let ((a (value (car args) bindings)))
+	     (display a)))
+	  
+	  ((string=? "newline" func)
+	   (newline))
+	  
+	  (else (error "call-foreign called with unknown operator" func)))))
+
+; 9-slide PROVE
+(clear_result)
+(newline)  
+(newline)  
+(prove6 '() goals db empty 1 '() db)
+(display_result)
+(newline)  
+(newline)
+
+;; end prolog-6a.scm
+    </script>
+
+    <script type="text/ohm-js">
+
+// pass 1 grammar
+
+      // An Ohm grammar for Scheme, step 1.
+Scm2JSBasic {
+  Program = Form+
+  Form = SList | Atom
+  QuotedSexp = "'" Form
+  BackQuotedSexp = "`" Form
+  CommaSexp = "," Form
+  SList = DottedList | NullTerminatedList
+  DottedList = "(" ListItem+ lexical_DOT ListItem ")"
+  NullTerminatedList =   "(" ListItem* ")"
+  ListItem = (Atom | SList)
+  Atom = lexical_atom | Syntactic_Atom
+  Syntactic_Atom = QuotedSexp | BackQuotedSexp | CommaSexp
+
+  lexical_atom = lexical_integer | lexical_symbol | lexical_string | lexical_boolean
+  lexical_boolean = "#f" | "#t"
+  lexical_integer = lexical_numchar+
+  lexical_numchar = "0".."9"
+  lexical_string = "\"" (~"\"" any)+ "\""
+  lexical_symbol = lexical_letchar (lexical_letchar | lexical_numchar)*
+  lexical_letchar = lexical_lc | lexical_uc | "+" | "*" | "!" | "?"  | "_" | "-" | "="
+  lexical_lc = "a".."z"
+  lexical_uc = "A".."Z"
+  lexical_DOT = space* "." space*
+  semiColonComment = ";" (~"\n" any)* "\n"
+  space += semiColonComment
+}
+</script>
+
+
+    <script type="text/ohm-js">
+
+// grammar for ListConstant pattern matching
+
+Scm2JSListConstants {
+  Program = Form+
+  Form = QuotedSexp | SList | Atom
+  SList = DottedList | NullTerminatedList
+  QuotedSexp = "(" lexical_QUOTE QuotedForm ")"
+  QuotedForm = QuotedSList | Atom
+  BackQuotedSexp = "`" Form
+  CommaSexp = "," Form
+  DottedList = "(" ListItem+ "." ListItem ")"
+  NullTerminatedList =   "(" ListItem* ")"
+  ListItem = (Atom | SList)
+  Atom = lexical_atom | Syntactic_Atom
+  Syntactic_Atom = QuotedSexp | BackQuotedSexp | CommaSexp
+
+  QuotedSList = QuotedDottedList | QuotedNullTerminatedList
+  QuotedNullTerminatedList =   "(" QListItem* ")"
+  QuotedDottedList = "(" QListItem+ "." QListItem ")"
+  QListItem = QAtom | QuotedSList
+  QAtom = QAtomicSymbol | QAtomicNonSymbol
+  QAtomicNonSymbol = lexical_integer | lexical_string | lexical_boolean
+  QAtomicSymbol = lexical_symbol
+
+  lexical_QUOTE = space* "quote" space*
+
+  lexical_atom = lexical_integer | lexical_symbol | lexical_string | lexical_boolean
+  lexical_boolean = "#f" | "#t"
+  lexical_integer = lexical_numchar+
+  lexical_numchar = "0".."9"
+  lexical_string = "\"" (~"\"" any)+ "\""
+  lexical_symbol = lexical_letchar (lexical_letchar | lexical_numchar)*
+  lexical_letchar = lexical_lc | lexical_uc | "+" | "*" | "!" | "?"  | "_" | "-" | "="
+  lexical_lc = "a".."z"
+  lexical_uc = "A".."Z"
+  semiColonComment = ";" (~"\n" any)* "\n"
+  space += semiColonComment
+}
+</script>
+
+
+    <script type="text/ohm-js">
+
+// Emitter grammar
+//Scm2JSEmitter <: Scm2JSBasic {
+// see https://ohmlang.github.io/editor/
+
+Scm2JSEmitter {
+  Program = (GlobalVariableDefinition | GlobalFunctionDefinition | TopLevelFunctionCall)+
+  Form = SList | Atom
+
+  DottedList = "(" ListItem+ "." ListItem ")"
+  NullTerminatedList =   "(" ListItem* ")"
+  ListItem = (Atom | SList)
+  Atom = lexical_atom
+
+  SList =   BEGIN lexical_AtNewListAt ListItem* END -- atnewlistat
+          | BEGIN lexical_AtNewDottedListAt ListItem* END -- atnewdottedlistat
+          | SpecialForm 
+          | FunctionCall
+          | NullTerminatedList
+          | DottedList 
+
+    SpecialForm = QuotedExpression | CondExpression | LetExpression | IfThenElseExpression | IfThenExpression | AndExpression | OrExpression | NotExpression | SetExpression
+
+
+  CondExpression = CondExpressionWithElse | CondExpressionWithoutElse
+  CondExpressionWithElse = BEGIN lexical_COND FirstCondClause MoreCondClause* CondElseClause END
+  CondExpressionWithoutElse = BEGIN lexical_COND FirstCondClause MoreCondClause* END
+    
+  FirstCondClause = CondClause
+  MoreCondClause = CondClause
+  CondClause = BEGIN ~lexical_ELSE CondTest CondStatementBlock END
+
+  CondTest = Form
+
+  CondElseClause = BEGIN lexical_ELSE CondStatementBlock END
+
+  CondStatementBlock = StatementBlock
+
+  StatementBlock = SequentialStatement
+  SequentialStatement = MidStatement* LastStatement
+  MidStatement = Statement &Statement
+  LastStatement = Statement ~Statement
+  Statement = Form
+
+
+
+  LetExpression = LetSequential | LetParallel
+
+  LetSequential = BEGIN lexical_LETSTAR LetBindings LetBody END
+  LetParallel = BEGIN lexical_LET LetBindings LetBody END
+
+  LetBindings = BEGIN Binding+ END
+  Binding = BEGIN LetVar LetBindingClause END
+  LetVar = lexical_symbol
+  LetBindingClause = Form
+  LetBody = StatementBlock
+    
+
+  IfThenElseExpression = BEGIN lexical_IF IfTestExpr ThenPart ElsePart END
+  IfThenExpression = BEGIN lexical_IF IfTestExpr ThenPart END
+  IfTestExpr = Form
+  ThenPart = Form
+  ElsePart = Form
+
+  AndExpression = BEGIN lexical_AND Bool+ END
+  OrExpression = BEGIN lexical_OR Bool+ END
+  NotExpression = BEGIN lexical_NOT Bool END
+  Bool = Form
+
+  SetExpression = BEGIN lexical_SET SetVar SetExpr END
+  SetVar = Identifier
+  SetExpr = Form
+
+  FunctionCall = BEGIN Identifier Arg* END
+  Identifier = ~Keyword lexical_symbol
+  Arg = ListItem
+
+
+  GlobalFunctionDefinition = BEGIN lexical_DEFINE BEGIN Identifier Identifier* END StatementBlock END
+    
+  GlobalVariableDefinition = BEGIN lexical_DEFINE Identifier Form END
+  TopLevelFunctionCall = FunctionCall
+
+
+  BEGIN = "("
+  END = ")"
+
+  QuotedExpression = QuotedSymbol | QuotedOther
+  QuotedSymbol = BEGIN lexical_QUOTE lexical_symbol END
+  QuotedOther = BEGIN lexical_QUOTE (lexical_integer | lexical_string | lexical_boolean) END
+
+
+  Keyword =   lexical_DEFINE
+            | lexical_COND 
+            | lexical_IF
+            | lexical_LET
+            | lexical_LETSTAR
+            | lexical_AtNewListAt 
+            | lexical_AtNewDottedListAt 
+            | lexical_AND | lexical_OR | lexical_NOT
+            | lexical_ELSE
+            | lexical_QUOTE
+            | lexical_SET
+
+  lexical_AND = "and" ~alnum space*
+  lexical_OR = "or" ~alnum space*
+  lexical_NOT = "not" ~alnum space*
+  lexical_AtNewListAt = "@newList@" ~alnum space*
+  lexical_AtNewDottedListAt = "@newDottedList@" ~alnum space*
+  lexical_DEFINE = "define" ~alnum space*
+  lexical_IF = "if" ~alnum space*
+  lexical_COND = "cond" ~alnum space*
+  lexical_ELSE = "else" ~alnum space*
+  lexical_LETSTAR = "let*" ~alnum space*
+  lexical_LET = "let" ~alnum space*
+  lexical_QUOTE = "quote" ~alnum space*
+  lexical_SET = "set!" ~alnum space*
+
+  lexical_atom = lexical_integer | lexical_symbol | lexical_string | lexical_boolean
+  lexical_boolean = "#f" | "#t"
+  lexical_integer = lexical_numchar+
+  lexical_numchar = "0".."9"
+  lexical_string = "\"" (~"\"" any)+ "\""
+  lexical_symbol = lexical_letchar (lexical_letchar | lexical_numchar)*
+  lexical_letchar = lexical_lc | lexical_uc | "+" | "*" | "!" | "?"  | "_" | "-" | "="
+  lexical_lc = "a".."z"
+  lexical_uc = "A".."Z"
+  semiColonComment = ";" (~"\n" any)* "\n"
+  space += semiColonComment
+
+    
+}
+
+
+      /*
+        see https://stackoverflow.com/questions/31909121/how-does-the-named-let-in-the-form-of-a-loop-work
+	for a description of named Let in Scheme.  From the above,
+
+(define (number->list n)
+  (let loop ((n n)
+             (acc '()))
+    (if (< n 10)
+        (cons n acc)
+        (loop (quotient n 10)
+              (cons (remainder n 10) acc)))))
+
+becomes...
+
+(define (number->list n)
+  (define (loop n acc)
+    (if (< n 10)
+        (cons n acc)
+        (loop (quotient n 10)
+              (cons (remainder n 10) acc))))
+  (loop n '()))
+
+(i.e "loop" becomes a function in the scope of the main function "number->list")
+
+in JS
+/* in JS:
+
+function number_to_list(n) {
+    var loop = function (n acc) {
+	return (n < 10) ? cons(n acc) : loop(remainder(n acc), acc)
+    };
+    loop(n, new Cons());
+}
+*/
+    </script>
+
+
+
+
+    <script>
+
+      var g_namespace = ohm.grammarsFromScriptElements();
+      var ws_grammar = g_namespace["WSGrammar"];
+      var pass1_grammar = g_namespace["Scm2JSBasic"];
+      var listConstants_grammar = g_namespace["Scm2JSListConstants"];
+      var emitter_grammar = g_namespace["Scm2JSEmitter"];
+
+      var tests = document.querySelectorAll('script[type="text/test"]');
+
+      function toSpaceDelimitedList(a) {
+	  return a.join(' ');
+      }
+      
+      function toDotted(a) {
+	  return a.join(',');
+      }
+      
+      function toBranchingAnd(a) {
+	  return a.join(' && ');
+      }
+      
+      function toBranchingOr(a) {
+	  return a.join(' || ');
+      }
+      
+      function toPackedString(a) {
+	  return a.join('');
+      }
+      
+
+// pass1 semantics
+
+      var pass1_semantics = pass1_grammar.createSemantics();
+      
+      pass1_semantics.addOperation(
+	  'unity',
+	  {
+	      Program: function(tree) {return toSpaceDelimitedList(tree.unity())},
+	      Form: function(item) {return item.unity()},
+	      QuotedSexp: function(_, form) {return "'" + form.unity()},
+	      BackQuotedSexp: function(_, form) {return "`" + form.unity()},
+	      CommaSexp: function(_, form) {return "," + form.unity()},
+	      SList: function(lis) {return lis.unity()},
+	      DottedList: function(_lp, items, _dot, lastItem, _rp) {
+		  return "(" + toSpaceDelimitedList(items.unity()) + " . " + lastItem.unity() + ")"},
+	      NullTerminatedList: function(_lp, items, _rp) {
+		  return "(" + toSpaceDelimitedList(items.unity()) + ")"},
+	      ListItem: function(item) {return item.unity()},
+	      Atom: function(a) {return a.unity()},
+	      lexical_integer: function(ns) {return toPackedString(ns.unity());},
+	      lexical_symbol: function(c, cs) {return c.unity() + toPackedString(cs.unity());},
+	      lexical_string: function(_q1, chars, _q2) {return "\"" + toPackedString(chars.unity()) + "\""},
+	      lexical_letchar: function(c) {return c.unity()},
+	      lexical_numchar: function(c) {return c.unity()},
+	      lexical_lc: function(c) {return c.unity()},
+	      lexical_uc: function(c) {return c.unity()},
+
+	      lexical_boolean: function(b) {return this.sourceString},
+	      _terminal: function() { return this.primitiveValue; }
+	  }
+      );
+      
+
+          pass1_semantics.addOperation(
+	  'unquote',
+	  {
+	      Program: function(tree) {return toSpaceDelimitedList(tree.unquote())},
+	      Form: function(item) {return item.unquote()},
+	      QuotedSexp: function(_, form) {return "(quote " + form.unquote() + ")"},
+	      BackQuotedSexp: function(_, form) {return "`" + form.unquote()},
+	      CommaSexp: function(_, form) {return "," + form.unquote()},
+	      SList: function(lis) {return lis.unquote()},
+	      DottedList: function(_lp, items, _dot, lastItem, _rp) {
+		  return "(" + toSpaceDelimitedList(items.unquote()) + " . " + lastItem.unquote() + ")"},
+	      NullTerminatedList: function(_lp, items, _rp) {
+		  return "(" + toSpaceDelimitedList(items.unquote()) + ")"},
+	      ListItem: function(item) {return item.unquote()},
+	      Atom: function(a) {return a.unquote()},
+	      lexical_integer: function(ns) {return toPackedString(ns.unquote());},
+	      lexical_symbol: function(c, cs) {return c.unquote() + toPackedString(cs.unquote());},
+	      lexical_string: function(_q1, chars, _q2) {return "\"" + toPackedString(chars.unquote()) + "\""},
+	      lexical_letchar: function(c) {return c.unquote()},
+	      lexical_numchar: function(c) {return c.unquote()},
+	      lexical_lc: function(c) {return c.unquote()},
+	      lexical_uc: function(c) {return c.unquote()},
+
+	      lexical_boolean: function(b) {return this.sourceString},
+	      _terminal: function() { return this.primitiveValue; }
+	  }
+      );
+
+
+
+          pass1_semantics.addOperation(
+	  'unbackquote',
+	  {
+	      Program: function(tree) {return toSpaceDelimitedList(tree.unbackquote())},
+	      Form: function(item) {return item.unbackquote()},
+	      QuotedSexp: function(_, form) {return "(quote " + form.unbackquote() + ")"},
+	      BackQuotedSexp: function(_, form) {return form.inbackquote();},
+	      CommaSexp: function(_, form) {throw "can\'t happen - comma not inside backquote - (actually, not necessarily the case, but nested backquotes left as an exercise for the reader)"},
+	      SList: function(lis) {return lis.unbackquote()},
+	      DottedList: function(_lp, items, _dot, lastItem, _rp) {
+		  return "(" + toSpaceDelimitedList(items.unbackquote()) + " . " + lastItem.unbackquote() + ")"},
+	      NullTerminatedList: function(_lp, items, _rp) {
+		  return "(" + toSpaceDelimitedList(items.unbackquote()) + ")"},
+	      ListItem: function(item) {return item.unbackquote()},
+	      Atom: function(a) {return a.unbackquote()},
+	      lexical_integer: function(ns) {return toPackedString(ns.unbackquote());},
+	      lexical_symbol: function(c, cs) {return c.unbackquote() + toPackedString(cs.unbackquote());},
+	      lexical_string: function(_q1, chars, _q2) {return "\"" + toPackedString(chars.unbackquote()) + "\""},
+	      lexical_letchar: function(c) {return c.unbackquote()},
+	      lexical_numchar: function(c) {return c.unbackquote()},
+	      lexical_lc: function(c) {return c.unbackquote()},
+	      lexical_uc: function(c) {return c.unbackquote()},
+
+	      lexical_boolean: function(b) {return this.sourceString},
+	      _terminal: function() { return this.primitiveValue; }
+	  }
+      );
+      
+          pass1_semantics.addOperation(
+	  'inbackquote',
+	  {
+	      Program: function(tree) {throw "can\'t happen"},
+	      Form: function(item) {return item.inbackquote()},
+	      QuotedSexp: function(_, form) {return "(quote " + form.inbackquote() + ")"},
+	      BackQuotedSexp: function(_, form) {throw "can\'t happen - left as exercise to the reader";},
+	      CommaSexp: function(_, form) {return form.unity()}, // use unbackquote to get eval'ed value
+	      SList: function(lis) {return lis.inbackquote()},
+	      DottedList: function(_lp, items, _dot, lastItem, _rp) {
+		  return "(list " + toSpaceDelimitedList(items.inbackquote()) + " . " + lastItem.inbackquote() + ")"},
+	      NullTerminatedList: function(_lp, items, _rp) {
+		  return "(list " + toSpaceDelimitedList(items.inbackquote()) + ")"},
+	      ListItem: function(item) {return item.inbackquote()},
+	      Atom: function(a) {return a.inbackquote()},
+	      lexical_integer: function(ns) {return toPackedString(ns.inbackquote());},
+	      lexical_symbol: function(c, cs) {return "(quote " + c.inbackquote() + toPackedString(cs.inbackquote()) + ")";},
+	      lexical_string: function(_q1, chars, _q2) {return "\"" + toPackedString(chars.inbackquote()) + "\""},
+	      lexical_letchar: function(c) {return c.inbackquote()},
+	      lexical_numchar: function(c) {return c.inbackquote()},
+	      lexical_lc: function(c) {return c.inbackquote()},
+	      lexical_uc: function(c) {return c.inbackquote()},
+
+	      lexical_boolean: function(b) {return this.sourceString},
+	      _terminal: function() { return this.primitiveValue; }
+	  }
+      );
+      
+////////
+
+// listConstants semantics
+      var listConstants_semantics = listConstants_grammar.createSemantics();
+
+      listConstants_semantics.addOperation(
+	  'listConstants',
+	  {
+	      Program: function(tree) {return toSpaceDelimitedList(tree.listConstants())},
+	      Form: function(item) {return item.listConstants()},
+	      SList: function(lis) {return lis.listConstants();},
+	      QuotedSexp: function(_lp,_q,form,_rp) {return form.listConstants()},
+	      BackQuotedSexp: function(_, form) {throw "can't happen";},
+	      CommaSexp: function(_, form) {throw "can't happen";},
+	      DottedList: function(_lp, items, _dot, lastItem, _rp) { throw "this solution does not support dotted list (except when quoted)"},
+	      NullTerminatedList: function(_lp, items, _rp) {
+		  return "(" + toSpaceDelimitedList(items.listConstants()) + ")"},
+	      ListItem: function(item) {return item.listConstants()},
+	      Atom: function(a) {return a.listConstants()},
+	      Syntactic_Atom: function(a) { return a.listConstants();},
+
+              QuotedSList: function(slist) { return slist.listConstants(); },
+              QuotedNullTerminatedList: function(_lp,qitem,_rp) { return "(@newList@ " + toSpaceDelimitedList(qitem.listConstants()) + ")"; },
+	      QuotedDottedList: function(_lp, items, _dot, lastItem, _rp) {
+		  return "(@newDottedList@ " + toSpaceDelimitedList(items.listConstants()) + " " + lastItem.listConstants() + ")"},
+              QListItem: function(item) { return item.listConstants(); },
+              QAtom: function(a) { return a.listConstants(); },
+              QAtomicNonSymbol: function(a) { return a.listConstants(); },
+              QAtomicSymbol: function(a) { return '"' + a.listConstants() + '"'; },
+
+	      lexical_QUOTE: function(_sp1,_q,_sp2) {return "";},
+
+	      lexical_atom: function(a) {return a.listConstants(); },
+	      lexical_boolean: function(b) {return this.sourceString},
+	      lexical_integer: function(ns) {return toPackedString(ns.listConstants());},
+	      lexical_numchar: function(c) {return c.listConstants()},
+	      lexical_string: function(_q1, chars, _q2) {return "\"" + toPackedString(chars.listConstants()) + "\""},
+	      lexical_symbol: function(c, cs) {return c.listConstants() + toPackedString(cs.listConstants());},
+	      lexical_letchar: function(c) {return c.listConstants()},
+	      lexical_lc: function(c) {return c.listConstants()},
+	      lexical_uc: function(c) {return c.listConstants()},
+
+	      _terminal: function() { return this.primitiveValue; }
+	  }
+      );
+      
+listConstants_semantics.addOperation(
+ 'toCL',
+ {
+     Program: function(form){return "(:Program " + form.toCL() + ")";},
+     Form: function(slistOrAtom) {return "(:Form " + slistOrAtom.toCL() + ")";},
+     SList: function(l) {return "(:SList " + l.toCL() + ")";},
+     QuotedSexp: function(_lp,_q,form,_rp) {return "(:QuotedSexp " + form.toCL() + ")";},
+     QuotedForm: function(slistOrAtom) {return "(:QuotedForm " + slistOrAtom.toCL() + ")";},
+     BackQuotedSexp: function(_q,form) {return "(:BackQuotedSexp " + form.toCL() + ")";},
+     CommaSexp: function(_comma,form) {return "(:CommaSexp " + form.toCL() + ")";},
+     DottedList: function(_lp,items,_dot,lastItem,_rp) {return "(:DottedList " + items.toCL() + lastItem.toCL() + ")";},
+     NullTerminatedList: function(_lp,items,_rp) {return "(:NullTerminatedList " + items.toCL() + ")"; },
+     ListItem: function(atomOrSlist) {return "(:ListItem " + atomOrSlist.toCL() + ")";},
+     Atom: function(atom) {return "(:Atom " + atom.toCL() + ")";},
+     Syntactic_Atom: function(atom) {return ":Syntactic_Atom " + atom.toCL() + ")";},
+     
+     QuotedSList: function (x) { return "(:QuotedSList " + x.toCL(); },
+     QuotedNullTerminatedList: function(_lp,ql,_rp){return "(:QuotedNullTerminatedList " + ql.toCL() + ")";},
+     QuotedDottedList: function(_lp,qitems,_dot,qLastItem,_rp){return "(:QuotedDottedList " + qitems.toCL() + qLastItem.toCL() + ")";},
+     QListItem: function(q){return "(:QListItem " + q.toCL() + ")";},
+     QAtom: function(q) {return "(:QAtom [[" + this.sourceString + "]] )";},
+     //QAtom: function(q) {return "(:QAtom " + q.toCL() + ")";},
+     QAtomicNonSymbol: function(q) {return "(:QAtomicNonSymbol " + q.toCL() + ")";},
+     QAtomicSymbol: function(q) {return "(:QAtomicSymbol " + q.toCL() + ")";},
+
+     lexical_QUOTE: function(_sp1,_q,_sp2) {return "(:lexical_QUOTE)";},
+
+     lexical_atom: function(latom) { return "(:lexical_atom [[" + this.sourceString + "]] )";},
+     //lexical_atom: function(latom) { return "(:lexical_atom " + latom.toCL() + ")";},
+     lexical_boolean: function(b) {return "(:lexical_boolean " + this.sourceString + ")";},
+     lexical_integer: function(ns) {return "(:lexical_integer " + ns.toCL() + ")";},
+     lexical_numchar: function(n) {return "(:lexical_numchar " + n.toCL() + ")";},
+     lexical_string: function(_q1,cs,_q2) {return "(:lexical_string " + cs.toCL() + ")";},
+     lexical_symbol: function(c1,cs) {return "(:lexical_symbol " + c1.toCL() + cs.toCL() + ")";},
+     lexical_letchar: function(c) {return "(:lexical_letchar " + c.toCL() + ")";},
+     lexical_lc: function(c) {return "(:lexical_lc " + c.toCL() + ")";},
+     lexical_uc: function(c) {return "(:lexical_uc " + c.toCL() + ")";},
+
+     _terminal: function() { return "(:_terminal " + this.primitiveValue + ")"; }
+ });
+
+
+
+// emitter semantics
+      var emitter_semantics = emitter_grammar.createSemantics();
+
+      emitter_semantics.addOperation(
+	  'toCL',
+	  {
+	      Program: function(tl) { return "(:Program " + tl.toCL() + ")";},
+	      Form: function(form) { return "(:Form " + form.toCL() + ")";},
+
+	      DottedList: function(_lp,items,_dot,lastItem,_rp) { 
+		  return "(:DottedList " + items.toCL() + " " + lastItem.toCL() + ")";},
+	      NullTerminatedList: function(_lp,items,_rp) { return "(:NullTerminatedList " + items.toCL() + ")";},
+	      ListItem: function(item) { return "(:ListItem " +  item.toCL() + ")";},
+	      Atom: function(a) { return "(:Atom " + a.toCL() + ")";},
+
+	      SList: function(form) { return "(:SList " + form.toCL() + ")";},
+	      SList_atnewlistat: function(_begin,_at,items,_end) { return "(:atnewlist " + items.toCL() + ")";},
+	      SList_atnewdottedlistat: function(_begin,_at,items,_end) { return "(:atnewdottedlist " + items.toCL() + ")";},
+
+	      SpecialForm: function(specialForm) { return "(:SpecialForm " + specialForm.toCL() + ")";},
+
+	      CondExpression: function(ce) { return "(:CondExpression " + ce.toCL() + ")";},
+	      CondExpressionWithElse: function(_begin,_cond,firstCondClause,moreCondClauses,condElseClause,_end) { 
+		  return "(:CondExpressionWithElse " + firstCondClause.toCL() + " " + moreCondClauses.toCL() + ")";},
+	      CondExpressionWithoutElse: function(_begin,_cond,firstCondClause,moreCondClauses,_end) { 
+		  return "(:CondExpressionWithoutElse " + firstCondClause.toCL() + " " + moreCondClauses.toCL() + ")";},
+    
+	      FirstCondClause: function(clause) { return "(:FirstCondClause " + clause.toCL() + ")";},
+	      MoreCondClause: function(clause) { return "(:MoreCondClause " + clause.toCL() + ")";},
+	      CondClause: function(_begin,condTest,statementBlock,_end) { 
+		  return "(:CondClause " + condTest.toCL() + " "  + statementBlock.toCL() + ")";},
+	      CondTest: function(form) { return "(:CondTest " + form.toCL() + ")";},
+
+	      CondElseClause: function(_begin,_else,statementBlock,_end) { 
+		  return "(:CondElseClause " + statementBlock.toCL() + ")";},
+
+	      CondStatementBlock: function(statementBlock) { 
+		  return "(:CondStatementBlock " + statementBlock.toCL() + ")";},
+
+	      StatementBlock: function(s) { return "(:StatementBlock " + s.toCL() + ")";},
+	      SequentialStatement: function(mids,last) { 
+		  return "(:SequentialStatement " + mids.toCL() + " " + last.toCL() + ")";},
+	      MidStatement: function(statement,_lookahead) { return "(:MidStatement " + statement.toCL() + ")";},
+	      LastStatement: function(statement) { return "(:LastStatement " + statement.toCL() + ")";},
+	      Statement: function(form) { return "(:Statement " + form.toCL() + ")";},
+
+	      LetExpression: function(le) { return "(:LetExpression " + le.toCL() + ")";},
+
+	      LetSequential: function(_begin,_letstar,bindings,body,_end) { 
+		  return "(:LetSequential " + bindings.toCL() + " " + body.toCL() + ")";},
+	      LetParallel: function(_begin,_let,bindings,body,_end) { 
+		  return "(:LetParallel " + bindings.toCL() + " " + body.toCL() + ")";},
+	      
+	      LetBindings: function(_begin,bindings,_end) { return "(:LetBindings " + bindings.toCL() + ")";},
+	      Binding: function(_begin,v,rhs,_end) { return "(:Binding " + v.toCL() + " " + rhs.toCL() + ")";},
+	      LetVar: function(v) { return "(:LetVar " + v.toCL() + ")";},
+	      LetBindingClause: function(form) { return "(:LetBindingClause " + form.toCL() + ")";},
+	      LetBody: function(statementBlock) { return "(:LetBodyClause " + statementBlock.toCL() + ")";},    
+
+	      IfThenElseExpression: function(_begin,_if,testExpr,thenPart,elsePart,_end) { 
+		  return "(:IfThenElseExpressio " + testExpr.toCL() + " " + thenPart.toCL() + " " + elsePart.toCL() + ")";},
+	      IfThenExpression: function(_begin,_if,testExpr,thenPart,_end) { 
+		  return "(:IfThenExpression " + testExpr.toCL() + " " + thenPart.toCL() + ")";},
+	      IfTestExpr: function(form) { return "(:IfTestExpr " + form.toCL() + ")";},
+	      ThenPart: function(form) { return "(:ThenPart " + form.toCL() + ")";},
+	      ElsePart: function(form) { return "(:ElsePart " + form.toCL() + ")";},
+
+	      AndExpression: function(_begin,_and,exprs,_end) { return "(:AndExpression " + exprs.toCL() + ")";},
+	      OrExpression: function(_begin,_or,exprs,_end) { return "(:OrExpression " + exprs.toCL() + ")";},
+	      NotExpression: function(_begin,_not,expr,_end) { return "(:NotExpression " + expr.toCL() + ")";},
+	      Bool: function(form) { return "(:Bool " + form.toCL() + ")";},
+
+              SetExpression: function(_begin,_set,v,e,_end) { return "(:SetExpression " + v.toCL + " " + e.ToCL() + ")"; },
+              SetVar: function(id) { return id.toCL(); },
+	      SetExpr: function(e) { return e.toCL(); },
+	      FunctionCall: function(_begin,id,args,_end) { return "(:FunctionCall " + id.toCL() + args.toCL() + ")";},
+	      Identifier: function(sym) { return "(:Identifier " + sym.toCL() + ")";},
+	      Arg: function(listItem) { return "(:Arg " + listItem.toCL() + ")";},
+
+
+	      GlobalFunctionDefinition: function(_begin,_define,_begin2,id,actuals,_end2,statementBlock,_end) { 
+		  return "(:GlobalFunctionDefinition " + id.toCL() + " " + actuals.toCL() + " " + statementBlock.toCL() + ")";},
+	      GlobalVariableDefinition: function(_begin,_define,id,form,_end) { 
+		  return "(:GlobalVariableDefinition " + id.toCL() + " " + form.toCL() + ")";},
+	      TopLevelFunctionCall: function(functionCall) { return "(:TopLevelFunctionCall " + functionCall.toCL() + ")";},
+
+	      BEGIN: function(_lp) { return "(:BEGIN)";},
+	      END: function(_rp) { return "(:END)";},
+	      
+	      QuotedExpression: function(e) { return "(:QuotedExpression " + e.toCL() + ")";},
+	      QuotedSymbol: function(_begin,_q,sym,_end) { return "(:QuotedSymbol " + sym.toCL() + ")";},
+	      QuotedOther: function(_begin,_q,e,_end) { return "(:QuoteOther " + e.toCL() + ")";},
+	      
+	      Keyword: function(lex) { return "(:Keyword " + lex.toCL() + ")";},
+	      
+	      lexical_AND: function(lex,_sp) { return "(:AND)";},
+	      lexical_OR: function(lex,_sp) { return "(:OR)";},
+	      lexical_NOT: function(lex,_sp) { return "(:NOT)";},
+	      lexical_AtNewListAt: function(lex,_sp) { return "(:AtNewList)";},
+	      lexical_AtNewDottedListAt: function(lex,_sp) { return "(:AtNewDottedList)";},
+	      lexical_DEFINE: function(lex,_sp) { return "(:DEFINE)";},
+	      lexical_IF: function(lex,_sp) { return "(:IF)";},
+	      lexical_COND: function(lex,_sp) { return "(:COND)";},
+	      lexical_ELSE: function(lex,_sp) { return "(:ELSE)";},
+	      lexical_LETSTAR: function(lex,_sp) { return "(LETSTAR)";},
+	      lexical_LET: function(lex,_sp) { return "(:LET)";},
+	      lexical_QUOTE: function(lex,_sp) { return "(:QUOTE)";},
+	      
+	      lexical_atom: function(a) { return "(:atom " + a.toCL() + ")";},
+	      lexical_boolean: function(b) { return "(:boolean";},
+	      lexical_integer: function(cs) { return "(:integer " + cs.toCL() + ")";},
+	      lexical_numchar: function(c) { return "(:numchar " + c.toCL() + ")";},
+	      lexical_string: function(_q1,cs,_q2) { return "(:string " + cs.toCL() + ")";},
+	      lexical_symbol: function(c,cs) { return "(:symbol [[" + this.sourceString + "]] )";},
+	      lexical_letchar: function(c) { return "(:letchar " + c.toCL() + ")";},
+	      lexical_lc: function(c) { return "(:lc " + c.toCL() + ")";},
+	      lexical_uc: function(c) { return "(:uc " + c.toCL() + ")";},
+	      _terminal: function() { return this.primitiveValue; }
+	  });
+
+      emitter_semantics.addOperation(
+	  'emitjs',
+	  {
+	      Program: function(listOfForms) {return toSpaceDelimitedList(listOfForms.emitjs())},
+              Arg: function(a) {return a.emitjs();},
+
+              Form: function(item) {return item.emitjs()},
+	      SList: function(lis) {return lis.emitjs()},
+              SList_atnewlistat: function(_begin,_at,items,_end) { return "list(" + items.emitjs() + ")"; },
+              SList_atnewdottedlistat: function(_begin,_at,items,_end) { return "cons(" + toDotted(items.emitjs()) + ")"; },
+
+              SpecialForm: function(e) { return e.emitjs(); },
+
+	      // CondExpression contains CondClauses (optional else clause)
+	      // CondClause contains Statements
+	      //
+	      // the first clause is emitted with "if"
+	      // subsequent (more) clauses are emitted with "} else if "
+	      //
+	      // statements are emitted suffixed by ':'
+	      // last statement is emitted as ' return ... ; '
+	      //
+              CondExpression: function(c){ return c.emitjs(); },
+              CondExpressionWithElse : function(_begin,_cond,firstClause,moreClauses,elseClause,_end) {
+                  return "(function(){<br>" + firstClause.emitjs() + toSpaceDelimitedList(moreClauses.emitjs()) + elseClause.emitjs() + "<br>})()" ; },
+              CondExpressionWithoutElse : function(_begin,_cond,firstClause,moreClauses,_end) {
+                  return "(function(){<br>"+ firstClause.emitjs() + toSpaceDelimitedList(moreClauses.emitjs()) + " else " + "{<br>return null;<br>}" + "<br>})()" ; },
+
+              FirstCondClause: function(c) { return "if " + c.emitjs(); },
+              MoreCondClause: function(c) { return " else if " + c.emitjs(); },
+	      CondClause: function(_begin,ctest,block,_end) {return "(" + ctest.emitjs() + ") {<br>" +  block.emitjs() + "<br>}"; },
+
+	      CondTest: function(f) { return f.emitjs(); },
+	      CondElseClause: function(_begin,_else,block,_end){ return "else {<br>" + block.emitjs() + "}<br>"; },
+
+              CondStatementBlock: function(sb) { return sb.emitjs(); },
+
+	      StatementBlock: function(atomOrSequential) { return atomOrSequential.emitjs(); },
+              SequentialStatement: function(midStatements, lastStatement) {
+		  return toSpaceDelimitedList(midStatements.emitjs()) + lastStatement.emitjs()},
+              MidStatement: function(s,_lookahead) { if (s._node.numChildren() > 0) {return s.emitjs() + ";<br>" ;} else {return "";}},
+              LastStatement: function(s) { return "return " + s.emitjs() + ";<br>" ;},
+              Statement: function(f) { return f.emitjs() ;},
+
+	      LetExpression: function(e) { return e.emitjs(); },
+              LetSequential: function(_begin,_letstar,bindings,body,_end) {
+		  throw "NIY: let*";
+		  return "(function(" + bindings.emitjs() + ") {<br>"+ body.emitjs() + "<br>})()"},
+              LetParallel: function(_begin,_let,bindings,body,_end) {
+		  return "(function(" + bindings.emitjs() + ") {<br>"+ body.emitjs() + "<br>})()"},
+
+              LetBindings: function(_begin,bindings,_end) { return bindings.emitjs(); },
+              Binding: function(_begin,v,e,_end) { return v.emitjs() + "=" + e.emitjs(); },
+              LetVar: function(id) {return id.emitjs(); },
+              LetBindingClause: function(e) { return e.emitjs(); },
+
+	      
+              IfThenElseExpression: function(_begin,_if,e,thenPart,elsePart,_end) {
+                  return "(function(){<br>if (" + e.emitjs() + ") {<br>return " + thenPart.emitjs() + ";<br>} else {<br>return " + elsePart.emitjs() + ";<br>}<br>})()";
+              },
+
+              IfThenExpression: function(_begin,_if,e,thenPart,_end) {
+                  return "(function(){<br>if (" + e.emitjs() + ") {<br>return " + thenPart.emitjs() + ";<br>} else {<br>" + "  return null;" + "<br>}<br>})()";
+              },
+
+              ThenPart: function(b) { return b.emitjs(); },
+              ElsePart: function(b) { return b.emitjs(); },
+
+              AndExpression: function(_begin,_and,booleans,_end) {
+		  return toBranchingAnd(booleans.emitjs());},
+              OrExpression: function(_begin,_and,booleans,_end) {
+		  return toBranchingOr(booleans.emitjs())},
+              NotExpression: function(_begin,_not,bool,_end) { return "(!" + bool.emitjs() + ")"; },
+              Bool: function(form){return form.emitjs(); },
+
+              SetExpression: function (_begin,_set,v,e,_end) { return "(" + v.emitjs() + " = " + e.emitjs() + ")"; },
+              SetVar: function (id) { return id.emitjs(); },
+              SetExpr: function (e) { return e.emitjs(); },
+
+              FunctionCall: function(_lp,id,actuals,_end) {return id.emitjs() + "(" + actuals.emitjs() + ")";},
+
+              GlobalFunctionDefinition: function(_begin,_define,_begin2,id,formals,_end2,body,_end) {
+		  return "function " + id.emitjs() + "(" + formals.emitjs() + ")" + " {<br>" + body.emitjs() + "};<br>"; },
+
+              GlobalVariableDefinition: function(_begin,_define,id,form,_end) {
+		  return "let " + id.emitjs() + " = " + form.emitjs() + ";<br>";},
+              TopLevelFunctionCall: function(fn) {return fn.emitjs() + ";<br>";},
+	      
+
+
+	      DottedList: function(_lp, items, _dot, lastItem, _rp) { throw "can't happen (in this solution)"; },
+	      //DottedList: function(_lp, items, _dot, lastItem, _rp) { return toSpaceDelimitedList(items.emitjs()) + " . " + lastItem.emitjs(); },
+
+	      NullTerminatedList: function(_lp, items, _rp) {
+		  return toSpaceDelimitedList(items.emitjs()) ;},
+	      ListItem: function(item) {return item.emitjs()},
+
+	      Atom: function(a) {return a.emitjs() ;},
+
+	      QuotedExpression: function(x) {return x.emitjs();},
+	      QuotedSymbol: function(_lp,_q,sym,_rp){ return '"' + sym.emitjs() + '"'},
+	      QuotedOther: function(_lp,_q,sym,_rp){ return sym.emitjs()},
+              lexical_QUOTE: function(_quote,_sp) {return "";},
+
+              Identifier: function(id) {return id.emitjs();},
+              END: function(_rp) {return "";},
+     
+              lexical_IF: function(_if,_sp) { return ""; },
+              lexical_ELSE: function(_else,_sp) { return ""; },
+              lexical_AND: function(_and,_sp) {return "";},
+              lexical_OR: function(_or,_sp2) {return "";},
+              lexical_NOT: function(_not,_sp) {return "";},
+              lexical_AtNewListAt: function(_atnewlistat,_rp) { return "" ; },
+              lexical_DEFINE: function(_,sp2){return "";},
+              lexical_LETSTAR: function(_let,_sp2) { return ""; },
+              lexical_LET: function(_let,_sp2) { return ""; },
+              lexical_COND: function(_,_sp2){return "";},
+              lexical_ELSE: function(_,_sp2){return "";},
+
+
+	      lexical_integer: function(ns) {return toPackedString(ns.emitjs());},
+	      lexical_symbol: function(c, cs) {return c.emitjs() + toPackedString(cs.emitjs());},
+	      lexical_string: function(_q1, chars, _q2) {return "\"" + toPackedString(chars.emitjs()) + "\""},
+	      lexical_letchar: function(c) {return c.emitjs()},
+	      lexical_numchar: function(c) {return c.emitjs()},
+	      lexical_lc: function(c) {return c.emitjs()},
+	      lexical_uc: function(c) {return c.emitjs()},
+
+	      lexical_boolean: function(b) {return ("#f" == this.sourceString) ? "false" : "true"; },
+	      _terminal: function() { return this.primitiveValue; }
+	  }
+      );
+
+////////
+
+      var resultsString = '';
+      var clString = '';
+      
+      function doPreReplacements(inputString) {
+	  var r = inputString
+	      .replace(/string[?]/g,"string_Q_")
+	      .replace(/string=[?]/g,"string_EQ_Q_")
+
+              .replace(/foreign[?]/g,"foreign_Q_")
+              .replace(/call-foreign/g,"call_foreign")
+              .replace(/resolved-args/g,"resolved_args")
+
+	      .replace(/'!/g,'"!"')
+	      .replace(/[(][+]/g,"(_plus ")
+	      .replace(/null[?]/g,"null_Q_")
+	      .replace(/pair[?]/g,"pair_Q_")
+	      .replace(/e[*]/g,"e_A_")
+	      .replace(/car[!]/g,"car_B_")
+	      .replace(/var[?]/g,"var_Q_")
+	      .replace(/eqv[?]/g,"eqv_Q_")
+	      .replace(/eq[?]/g,"eq_Q_")
+	      .replace(/set-car/g,"set_car")
+	      .replace(/lookup-loop/g,"lookup_loop")
+	      .replace(/whole-db/g,"whole_db")
+	      .replace(/try/g,"_try")
+
+	      .replace(/print-frame/g,"print_frame")
+
+	  ;
+	  return r;
+      }
+      
+      function doPostReplacements(inputString) {
+	  var r = inputString
+	      .replace(/[(]r!,/g,'("r!",')
+              .replace(/set!/g,"set_B_")
+	  ;
+	  return r;
+      }
+      
+      function displayDate () {
+	  document.getElementById('timestamp').innerHTML = Date();
+      }
+
+      function doListConstantsPipeline(testElement) {
+	  var testString = doPreReplacements(testElement.innerHTML);
+
+          var parsed_pass1 = pass1_grammar.match(testString);
+	  if (parsed_pass1.failed()) {
+	      resultsString = resultsString + "<br>pass1 parse *FAILED*<br>input:<br>" + testString;
+	      console.log(pass1_grammar.trace(testString).toString());
+              console.log(testString);
+	      console.log(parsed_pass1.shortMessage);
+              console.log(parsed_pass1.getRightmostFailures());
+              console.log(parsed_pass1.getRightmostFailures().toString());
+	  } else {
+              var transpiled_pass1 = pass1_semantics(parsed_pass1).unbackquote();
+	      
+	      var parsed_listConstants = listConstants_grammar.match(transpiled_pass1);
+	      if (parsed_listConstants.failed()) {
+		  resultsString = resultsString + "<br>listConstants parse *FAILED*<br>";
+	      } else {		  
+		  var transpiled_listConstants = listConstants_semantics(parsed_listConstants).listConstants();
+		  resultsString = resultsString + "<br>input:<br>" + testString + " ==>";
+		  resultsString = resultsString + "<br>listConstants:<br>" + transpiled_listConstants;
+		  clString = listConstants_semantics(parsed_listConstants).toCL();
+	      }
+	  }
+      }
+      
+      function doTree(testElement) {
+	  var testString = doPreReplacements(testElement.innerHTML);
+
+          var parsed_pass1 = pass1_grammar.match(testString);
+	  if (parsed_pass1.failed()) {
+	      console.log(pass1_grammar.trace(testString).toString());
+	      resultsString = resultsString + "<br>pass1 parse *FAILED*<br>input:<br>" + testString;
+	      console.log(parsed_pass1.shortMessage);
+              console.log(parsed_pass1.getRightmostFailures());
+              console.log(parsed_pass1.getRightmostFailures().toString());
+	  } else {
+              var transpiled_pass1 = pass1_semantics(parsed_pass1).unbackquote();
+	      
+	      var parsed_listConstants = listConstants_grammar.match(transpiled_pass1);
+	      if (parsed_listConstants.failed()) {
+		  resultsString = resultsString + "<br>listConstants parse *FAILED*<br>";
+	      } else {		  
+		  var transpiled_listConstants = listConstants_semantics(parsed_listConstants).listConstants();
+		  
+		  // console.log( emitter_grammar.trace(transpiled_listConstants).toString() );
+		  var parsed_emitter = emitter_grammar.match(transpiled_listConstants);
+		  if (parsed_emitter.failed()) {
+		      resultsString = resultsString + "<br>emitter parse *FAILED*";
+		      resultsString = resultsString + "<br>transpiled listConstants=<br>" + transpiled_listConstants;
+		      resultsString = resultsString + "<br>trace in console";
+		      console.log(emitter_grammar.trace(transpiled_listConstants).toString());
+		  } else {
+		      var tree = emitter_semantics(parsed_emitter).toCL();
+		      resultsString = resultsString + "<br>input:<br>" + testString + " ==><br><br>";
+		      resultsString = resultsString + "<br>listConstants:<br>" + transpiled_listConstants + " ==><br><br>";
+		      resultsString = resultsString + "<br>final:<br>" + tree;
+		  }
+	      }
+	  }
+      }
+      
+      function doOrg(testElement) {
+	  var testString = doPreReplacements(testElement.innerHTML);
+
+          var parsed_pass1 = pass1_grammar.match(testString);
+	  if (parsed_pass1.failed()) {
+	      console.log(pass1_grammar.trace(testString).toString());
+	      resultsString = resultsString + "<br>pass1 parse *FAILED*<br>input:<br>" + testString;
+	      console.log(parsed_pass1.shortMessage);
+              console.log(parsed_pass1.getRightmostFailures());
+              console.log(parsed_pass1.getRightmostFailures().toString());
+	  } else {
+              var transpiled_pass1 = pass1_semantics(parsed_pass1).unbackquote();
+	      
+	      var parsed_listConstants = listConstants_grammar.match(transpiled_pass1);
+	      if (parsed_listConstants.failed()) {
+		  resultsString = resultsString + "<br>listConstants parse *FAILED*<br>";
+	      } else {		  
+		  var transpiled_listConstants = listConstants_semantics(parsed_listConstants).listConstants();
+		  
+		  // console.log( emitter_grammar.trace(transpiled_listConstants).toString() );
+		  var parsed_emitter = emitter_grammar.match(transpiled_listConstants);
+		  if (parsed_emitter.failed()) {
+		      resultsString = resultsString + "<br>emitter parse *FAILED*";
+		      resultsString = resultsString + "<br>transpiled listConstants=<br>" + transpiled_listConstants;
+		      resultsString = resultsString + "<br>trace in console";
+		      console.log(emitter_grammar.trace(transpiled_listConstants).toString());
+		  } else {
+		      var org = emitter_semantics(parsed_emitter).toORG();
+		      resultsString = resultsString + "<br>input:<br>" + testString + " ==><br><br>";
+		      resultsString = resultsString + "<br>listConstants:<br>" + transpiled_listConstants + " ==><br><br>";
+		      resultsString = resultsString + "<br>final:<br>" + org;
+		  }
+	      }
+	  }
+      }
+      
+      function doPipeline(testElement) {
+	  var testString = testElement.innerHTML;
+	  var str = doPreReplacements(testString);
+
+          var parsed_pass1 = pass1_grammar.match(str);
+	  if (parsed_pass1.failed()) {
+	      // console.log(pass1_grammar.trace(str).toString());
+	      resultsString = resultsString + "<br>pass1 parse *FAILED*<br>input:<br>" + testString;
+	      resultsString = resultsString + "<br>pre Replacements<br>input:<br>" + str;
+	      // console.log(parsed_pass1.shortMessage);
+              // console.log(parsed_pass1.getRightmostFailures());
+              // console.log(parsed_pass1.getRightmostFailures().toString());
+	  } else {
+              var transpiled_pass1 = pass1_semantics(parsed_pass1).unbackquote();
+	      
+	      var parsed_listConstants = listConstants_grammar.match(transpiled_pass1);
+	      if (parsed_listConstants.failed()) {
+		  resultsString = resultsString + "<br>listConstants parse *FAILED*<br>";
+	      } else {		  
+		  var transpiled_listConstants = listConstants_semantics(parsed_listConstants).listConstants();
+
+		  // console.log( emitter_grammar.trace(transpiled_listConstants).toString() );
+		  var str = doPreReplacements(transpiled_listConstants);
+		  var parsed_emitter = emitter_grammar.match(str);
+		  if (parsed_emitter.failed()) {
+		      resultsString = resultsString + "<br>emitter parse *FAILED*";
+		      resultsString = resultsString + "<br>transpiled listConstants=<br>" + transpiled_listConstants;
+		      resultsString = resultsString + "<br>trace in console";
+		      console.log(emitter_grammar.trace(transpiled_listConstants).toString());
+		  } else {
+		      var transpiled_emitter = doPostReplacements(emitter_semantics(parsed_emitter).emitjs());
+		      // resultsString = resultsString + "<br>input:<br>" + testString + " ==><br><br>";
+		      // resultsString = resultsString + "<br>listConstants:<br>" + transpiled_listConstants + " ==><br><br>";
+		      resultsString = resultsString + "<br>final:<br>" + transpiled_emitter;
+		  }
+	      }
+	  }
+      }
+
+      function displayTestResults(s,el) {
+	  document.getElementById(el).innerHTML = s;
+      }
+
+      function displayStringsEqual(s1,s2,el) {
+          document.getElementById(el).innerHTML = (s1 == s2);
+      }
+
+      function listConstantsPipelinetest() {
+	  resultsString = '';
+	  clString = '';
+	  tests.forEach(doListConstantsPipeline);
+	  displayTestResults(resultsString,'result');
+	  displayTestResults(clString,'cl');
+	  displayDate();
+      }
+      function tree() {
+	  resultsString = '';
+	  tests.forEach(doTree);
+	  displayTestResults(resultsString,'result');
+	  displayDate();
+      }
+      function org() {
+	  resultsString = '';
+	  tests.forEach(doOrg);
+	  displayTestResults(resultsString,'result');
+	  displayDate();
+      }
+      function pipelinetest() {
+	  resultsString = '';
+	  tests.forEach(doPipeline);
+	  displayTestResults(resultsString,'result');
+	  displayDate();
+      }
+
+
+      function displayInput(testElement) {
+	  let testString = testElement.innerHTML;
+	  displayTestResults(testString,'result');
+	  displayDate();
+      }
+
+      function displayAllInputs() {
+	  tests.forEach(displayInput);
+      }
+
+</script>
+
+
+
+
+
+
+  </head>
+  <body>
+    <button onclick="displayAllInputs()">Display Input</button>
+    <button onclick="listConstantsPipelinetest()">pass1 & listConstants</button>
+    <button onclick="tree()">pass1 & listConstants & emitter tree</button>
+    <button onclick="pipelinetest()">emit JavaScript</button>
+    <p id="timestamp"></p>
+    <p id="result"></p>
+    <p id="cl"></p>
+  </body>
+</html>

@@ -197,11 +197,11 @@ bqscheme <: scheme {
 	      {
 		  let regression_src = document.getElementById ('output').value;
 		  let regression_grammar = grammars["scheme"]
-		  let regression_matchResult = regression_grammar.match (src);
+		  let regression_matchResult = regression_grammar.match (regression_src);
 		  if (regression_matchResult.succeeded ()) {
-		      document.getElementById('regression').innerHTML = "regression Parsed OK";
+		      document.getElementById('regression').innerHTML = "regression Test OK";
 		  } else {
-		      document.getElementById('regression').innerHTML = "regression FAILED";
+		      document.getElementById('regression').innerHTML = "regression Test FAILED";
 		  }
 	      }
 	  } else {

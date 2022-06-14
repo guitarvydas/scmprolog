@@ -1,6 +1,13 @@
 scheme {
   Main = Sexpr+
   Sexpr =
+    | sq "(" ")" -- emptylist
+    | "(" "if" Sexpr Sexpr Sexpr? ")" -- if
+    | "(" "and" Sexpr+ ")" -- and
+    | "(" "or" Sexpr+ ")" -- or
+    | "(" "cond" Sexpr+ "(" "else" Sexpr+ ")" ")" -- cond
+    | "(" "define" List Sexpr ")" -- function
+    | "(" "define" Sexpr Sexpr ")" -- var
     | QuotedSexpr -- quoted
     | bq Sexpr -- bq
     | "," Sexpr -- comma
@@ -11,6 +18,8 @@ scheme {
 atom =
   | string
   | number
+  | "#f"
+  | "#t"
   | symbol
 
 List = "(" Sexpr* ")"
@@ -20,7 +29,7 @@ QuotedSexpr = sq Sexpr
 string = dq (~dq any)* dq
 number = digit+
 ws = " " | "\n" | "\t"
-separator = "(" | ")" | "," | bq | sq | ",@" | dq | ";"
+separator = "(" | ")" | "," | bq | sq | ",@" | dq | ";" | "#"
 dq = "\""
 sq = "'"
 bq = "`"

@@ -12,13 +12,16 @@
     <br>
     <label for="src">source:</label>
     <textarea id="src" rows="7" cols="60" placeholder="src" style="background-color:oldlace;">
-      a
-      'a
-      `a
-      `(a)
       `(a ,b c)
-      `(a ,@(b c) d)
     </textarea>
+    <!-- <textarea id="hold-src" rows="7" cols="60" placeholder="src" style="background-color:oldlace;"> -->
+    <!--   a -->
+    <!--   'a -->
+    <!--   `a -->
+    <!--   `(a) -->
+    <!--   `(a ,b c) -->
+    <!--   `(a ,@(b c) d) -->
+    <!-- </textarea> -->
     <br>
     <label for="output">output:</label>
     <textarea id="output" rows="7" cols="60" placeholder="transpiled"  readonly style="background-color:whitesmoke;">
@@ -77,13 +80,9 @@ bqscheme <: scheme {
     | atom -- atom
   BQSexpr =
     | ",@" BQSexpr -- bqsplice
-    | "," BQSexpr -- bqeval
-    | BQList -- bqlist
+    | "," Sexpr -- bqeval
+    | List -- bqlist
     | atom -- bqatom
-  BQList =
-    | "(" BQSexpr* "." BQSexpr ")" -- dotted
-    | "(" BQSexpr* ")" -- plain
-
 }
 `);
 
@@ -175,7 +174,7 @@ bqscheme <: scheme {
 	  },
 	  
 	  BQSexpr_bqeval: function (kcomma, BQSexpr) {
-	      return `,${BQSexpr.bq ()}`;
+	      return `${BQSexpr.bq ()}`;
 	  },
 	  
 	  BQSexpr_bqlist: function (BQSexpr) {
@@ -183,14 +182,14 @@ bqscheme <: scheme {
 	  },
 	  
 	  BQSexpr_bqatom: function (a) {
-	      return `'${a.bq ()}`;
+	      return `${a.bq ()}`;
 	  },
 	  
 	  BQList_dotted: function (klp, BQSexprs1, kdot, BQSexpr2, krp) {
-	      return `${BQSexprs1.bq ().join ('')} . ${BQSexpr2.bq ()}`;
+	      return `'${BQSexprs1.bq ().join (" '")} . '${BQSexpr2.bq ()}`;
 	  },
 	  BQList_plain: function (klp, BQSexprs, krp) {
-	      return `${BQSexprs.bq ().join ('')}`;
+	      return `'${BQSexprs.bq ().join (" '")}`;
 	  },
 	  
 	  _terminal: function () { return this.sourceString; },

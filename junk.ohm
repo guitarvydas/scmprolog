@@ -1,0 +1,14 @@
+bqscheme <: scheme {
+  Sexpr :=
+    | QuotedSexpr -- quoted
+    | bq BQSexpr -- bq
+    | List -- list
+    | atom -- atom
+  BQSexpr =
+    | ",@" BQSexpr -- bqsplice
+    | "," Sexpr -- bqeval
+    | List -- bqlist
+    | atom -- bqatom
+  BQList =
+    | "(" Sexpr* "." Sexpr ")" -- dotted
+    | "(" Sexpr* ")" -- plain

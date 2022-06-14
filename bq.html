@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <style>
+      textarea {
+      }
+    </style>
+  </head>
+  <body>
+
+    <h1>Backquote Replacer For Scheme</h1>
+    <br>
+    <label for="src">source:</label>
+    <textarea id="src" rows="7" cols="60" placeholder="src" style="background-color:oldlace;">
+      a
+      'a
+      `a
+      `(a)
+      `(a ,b c)
+      `(a ,@(b c) d)
+    </textarea>
+    <br>
+    <label for="output">output:</label>
+    <textarea id="output" rows="7" cols="60" placeholder="transpiled"  readonly style="background-color:whitesmoke;">
+    </textarea>
+    <br>
+    <p id="status" > READY </p>
+
+    <!-- Ohm-JS -->
+    <script src="https://unpkg.com/ohm-js@16/dist/ohm.min.js"></script>
+
+
+    <br>
+    <button onclick="bqreplace ()">Replace Backquotes</button>
+    <script>
+
+      const grammars = ohm.grammars(String.raw`
+scheme {
+  Main = Sexpr+
+  Sexpr =
+    | QuotedSexpr -- quoted
+    | List -- list
+    | atom -- atom
+
+atom =
+  | string
+  | number
+  | "#f"
+  | "#t"
+  | symbol
+
+List =
+ | "(" Sexpr* "." Sexpr ")" -- dotted
+ | "(" Sexpr* ")" -- plain
+
+QuotedSexpr = sq Sexpr
+
+string = dq (~dq any)* dq
+number = digit+
+ws = " " | "\n" | "\t"
+separator = "(" | ")" | "," | bq | sq | ",@" | dq | ";" | "#" | "."
+dq = "\""
+sq = "'"
+bq = "\x60"
+symbol = symchar+
+symchar = ~separator ~ws any
+comment = ";" (~nl any)* nl
+nl = "\n"
+space += comment
+}
+
+bqscheme <: scheme {
+  Sexpr :=
+    | QuotedSexpr -- quoted
+    | bq BQSexpr -- bq
+    | List -- list
+    | atom -- atom
+  BQSexpr =
+    | ",@" BQSexpr -- bqsplice
+    | "," BQSexpr -- bqeval
+    | BQList -- bqlist
+    | atom -- bqatom
+  BQList =
+    | "(" BQSexpr* "." BQSexpr ")" -- dotted
+    | "(" BQSexpr* ")" -- plain
+
+}
+`);
+
+      const hooks = {
+	  
+	  Main: function (Sexprs) {
+	      return `${Sexprs.bq ().join ('\n')}`;
+	  },
+	  
+	  atom: function (a) {
+	      return `${a.bq ()}`;
+	  },
+	  
+	  List_dotted: function (klp, Sexprs1, kdot, Sexpr2, krp) {
+	      return `(${Sexprs1.bq ().join ('')} . ${Sexpr2.bq ()})`;
+	  },
+	  
+	  QuotedSexpr: function (sq, Sexpr) {
+	      return `'${Sexpr.bq ()}`;
+	  },
+	  
+	  string: function (dq1, cs, dq2) {
+	      return `"${cs.bq ().join ('')}"`;
+	  },
+	  
+	  number: function (ds) {
+	      return ds.bq ().join ('');
+	  },
+	  
+	  ws: function (c) {
+	      return c.bq ();
+	  },
+	  
+	  separator: function (c) {
+	      return c.bq ();
+	  },
+	  
+	  dq: function (c) {
+	      return c.bq ();
+	  },
+	  
+	  sq: function (c) {
+	      return c.bq ();
+	  },
+	  
+	  bq: function (c) {
+	      return c.bq ();
+	  },
+	  
+	  symbol: function (symchars) {
+	      return symchars.bq ().join ('') + ' ';
+	  },
+	  
+	  symchar: function (c) {
+	      return c.bq ();
+	  },
+	  
+	  comment: function (ksemicolon, cs, nl) {
+	      return `;${cs.bq ().join ('')}${nl.bq ()}`;
+	  },
+	  
+	  nl: function (c) {
+	      return c.bq ();
+	  },
+	  
+	  space: function (c) {
+	      return c.bq ();
+	  },
+	  
+	  // bqscheme
+	  Sexpr_quoted: function (x) {
+	      return x.bq ();
+	  },
+	  
+	  Sexpr_bq: function (kbq, x) {
+	      return `(list ${x.bq ()})`;
+	  },
+	  
+	  Sexpr_list: function (x) {
+	      return x.bq ();
+	  },
+	  
+	  Sexpr_atom: function (x) {
+	      return x.bq ();
+	  },
+	  
+	  BQSexpr_bqsplice: function (kcommaat, BQSexpr) {
+	      return `,@${BQSexpr.bq ()}`;
+	  },
+	  
+	  BQSexpr_bqeval: function (kcomma, BQSexpr) {
+	      return `,${BQSexpr.bq ()}`;
+	  },
+	  
+	  BQSexpr_bqlist: function (BQSexpr) {
+	      return BQSexpr.bq ();
+	  },
+	  
+	  BQSexpr_bqatom: function (a) {
+	      return `'${a.bq ()}`;
+	  },
+	  
+	  BQList_dotted: function (klp, BQSexprs1, kdot, BQSexpr2, krp) {
+	      return `${BQSexprs1.bq ().join ('')} . ${BQSexpr2.bq ()}`;
+	  },
+	  BQList_plain: function (klp, BQSexprs, krp) {
+	      return `${BQSexprs.bq ().join ('')}`;
+	  },
+	  
+	  _terminal: function () { return this.sourceString; },
+	  _iter: function (...children) {
+	      var mapped = children.map(c => {
+		  var r = c.bq ();
+		  return r;
+	      });
+	      return mapped;
+	  }
+      };
+
+      function bqreplace () {
+	  let src = document.getElementById('src').value;
+	  let grammar = grammars["bqscheme"]
+	  let matchResult = grammar.match (src);
+	  if (matchResult.succeeded ()) {
+              document.getElementById('status').innerHTML = "OK";
+              let sem = grammar.createSemantics ();
+              sem.addOperation ('bq ()', hooks);
+              let treeWalker = sem (matchResult);
+              let text = treeWalker.bq ();
+              document.getElementById('output').value = text;
+	  } else {
+              document.getElementById('output').value = grammar.trace (src);
+              document.getElementById('status').innerHTML = "parse FAILED";
+	  }
+      }
+    </script>
+  </body>
+</html>
+

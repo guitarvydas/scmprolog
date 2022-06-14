@@ -3,8 +3,8 @@ scheme {
   Sexpr =
     | QuotedSexpr -- quoted
     | bq Sexpr -- bq
-    | "," Sexpr -- comma
     | ",@" Sexpr -- commaat
+    | "," Sexpr -- comma
     | List -- list
     | atom -- atom
 
@@ -33,4 +33,21 @@ symchar = ~separator ~ws any
 comment = ";" (~nl any)* nl
 nl = "\n"
 space += comment
+}
+
+bqscheme <: scheme {
+  Sexpr :=
+    | QuotedSexpr -- quoted
+    | bq BQSexpr -- bq
+    | List -- list
+    | atom -- atom
+  BQSexpr =
+    | ",@" BQSexpr -- bqsplice
+    | "," BQSexpr -- bqeval
+    | BQList -- bqlist
+    | atom -- bqatom
+  BQList =
+    | "(" BQSexpr* "." BQSexpr ")" -- dotted
+    | "(" BQSexpr* ")" -- plain
+
 }
